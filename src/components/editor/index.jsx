@@ -15,7 +15,7 @@ const doc = DOMParser.fromSchema(mySchema).parse(document.createElement("div"));
 
 const plugins = exampleSetup({ schema: mySchema });
 
-export function Editor() {
+export default function Editor() {
     const editorRef = useRef(null);
     const editorDom = useRef(null);
 

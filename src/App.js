@@ -1,8 +1,8 @@
 import "./App.css";
-import NoteViewer from "./components/editor/verbum";
+import Editor from "./components/editor/index";
 
 function App() {
-  return <NoteViewer />;
+  return <Editor />;
 }
 
 export default App;
