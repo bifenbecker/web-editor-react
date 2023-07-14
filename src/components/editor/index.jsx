@@ -25,7 +25,10 @@ const fontFamilyMarkSpec = {
             getAttrs: (value) => ({ fontFamily: value }),
         },
     ],
-    toDOM: (node) => ["span", { style: `font-family: ${node.attrs.fontFamily}` }],
+    toDOM: (node) => [
+        "span",
+        { style: `font-family: ${node.attrs.fontFamily}` },
+    ],
 };
 
 const tabulationMarkSpec = {
@@ -36,12 +39,10 @@ const tabulationMarkSpec = {
             getAttrs: (value) => ({ tabSize: parseInt(value, 10) }),
         },
     ],
-    toDOM: (node) => [
-        "pre",
-        { style: `tab-size: ${node.attrs.tabSize}` },
-        0,
-    ],
+    toDOM: (node) => ["pre", { style: `tab-size: ${node.attrs.tabSize}` }, 0],
 };
+
+const nonBreakingSpace = "\u00A0";
 
 const mySchema = new Schema({
     nodes: addListNodes(schema.spec.nodes, "paragraph block*", "block"),
@@ -50,6 +51,7 @@ const mySchema = new Schema({
         fontSize: fontSizeMarkSpec,
         fontFamily: fontFamilyMarkSpec,
         tabulation: tabulationMarkSpec,
+        nonBreakingSpace: nonBreakingSpace,
     },
 });
 
@@ -74,9 +76,7 @@ export default function Editor() {
     }, []);
 
     const handleTransaction = (transaction) => {
-        const { state } = editorRef.current.state.applyTransaction(
-            transaction
-        );
+        const { state } = editorRef.current.state.applyTransaction(transaction);
         editorRef.current.updateState(state);
         const fontSizeMark = mySchema.marks.fontSize;
         const fontSize = fontSizeMark ? fontSizeMark.attrs.size : 16;
@@ -116,19 +116,28 @@ export default function Editor() {
         setFontFamily(fontFamily);
     };
 
-    const handleChangeTabSize = (e) => {
-        const tabSize = parseInt(e.target.value);
+    const handleTabulation = () => {
         const { tr } = editorRef.current.state;
-        const { selection } = tr;
-        if (!selection.empty) {
-            tr.addMark(
-                selection.from,
-                selection.to,
-                mySchema.marks.tabulation.create({ tabSize })
-            );
-            editorRef.current.dispatch(tr);
+        const { $from } = tr.selection;
+
+        const tabCharacter = "\t";
+        tr.insertText(tabCharacter, $from.pos, $from.pos);
+        editorRef.current.dispatch(tr);
+    };
+
+    const handleInsertNonBreakingSpace = () => {
+        const { tr } = editorRef.current.state;
+        const { $from } = tr.selection;
+
+        tr.insertText(nonBreakingSpace, $from.pos, $from.pos);
+        editorRef.current.dispatch(tr);
+      };
+
+    const handleKeyDown = (e) => {
+        if (e.key === "Tab") {
+            e.preventDefault();
+            handleTabulation();
         }
-        setTabSize(tabSize);
     };
 
     return (
@@ -160,18 +169,14 @@ export default function Editor() {
                 </select>
             </div>
             <div>
-                <label htmlFor="tab-size">Tab Size: </label>
-                <select
-                    id="tab-size"
-                    value={tabSize}
-                    onChange={handleChangeTabSize}
-                >
-                    <option value="2">2</option>
-                    <option value="4">4</option>
-                    <option value="8">8</option>
-                </select>
+                Tabulation (works by a button on the keyboard):{" "}
+                <button onClick={handleTabulation}>Tab</button>
             </div>
-            <div id="editor" ref={editorDom} />
+            <div>
+                Insert Non-Breaking Space:{" "}
+                <button onClick={handleInsertNonBreakingSpace}>space</button>
+            </div>
+            <div id="editor" ref={editorDom} onKeyDown={handleKeyDown} tabIndex={0} />
         </div>
     );
 }
