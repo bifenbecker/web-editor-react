@@ -1,11 +1,10 @@
-import { useState, useEffect, useRef } from "react";
-import { EditorState, Transaction } from "prosemirror-state";
+import React, { useState, useEffect, useRef } from "react";
+import { EditorState } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { Schema, DOMParser } from "prosemirror-model";
 import { schema } from "prosemirror-schema-basic";
 import { addListNodes } from "prosemirror-schema-list";
 import { exampleSetup } from "prosemirror-example-setup";
-
 
 const fontSizeMarkSpec = {
     attrs: { size: { default: 16 } },
@@ -26,9 +25,21 @@ const fontFamilyMarkSpec = {
             getAttrs: (value) => ({ fontFamily: value }),
         },
     ],
+    toDOM: (node) => ["span", { style: `font-family: ${node.attrs.fontFamily}` }],
+};
+
+const tabulationMarkSpec = {
+    attrs: { tabSize: { default: 4 } },
+    parseDOM: [
+        {
+            style: "tab-size",
+            getAttrs: (value) => ({ tabSize: parseInt(value, 10) }),
+        },
+    ],
     toDOM: (node) => [
-        "span",
-        { style: `font-family: ${node.attrs.fontFamily}` },
+        "pre",
+        { style: `tab-size: ${node.attrs.tabSize}` },
+        0,
     ],
 };
 
@@ -38,17 +49,18 @@ const mySchema = new Schema({
         ...schema.spec.marks,
         fontSize: fontSizeMarkSpec,
         fontFamily: fontFamilyMarkSpec,
+        tabulation: tabulationMarkSpec,
     },
 });
 
 const doc = DOMParser.fromSchema(mySchema).parse(document.createElement("div"));
-
 
 export default function Editor() {
     const editorRef = useRef(null);
     const editorDom = useRef(null);
     const [fontSize, setFontSize] = useState(16);
     const [fontFamily, setFontFamily] = useState("Arial");
+    const [tabSize, setTabSize] = useState(4);
 
     useEffect(() => {
         if (!editorRef.current) {
@@ -61,13 +73,17 @@ export default function Editor() {
         }
     }, []);
 
-    const handleTransaction = (transaction: Transaction) => {
-        const { state, transactions } =
-            editorRef.current.state.applyTransaction(transaction);
+    const handleTransaction = (transaction) => {
+        const { state } = editorRef.current.state.applyTransaction(
+            transaction
+        );
         editorRef.current.updateState(state);
         const fontSizeMark = mySchema.marks.fontSize;
         const fontSize = fontSizeMark ? fontSizeMark.attrs.size : 16;
         setFontSize(fontSize);
+        const tabulationMark = mySchema.marks.tabulation;
+        const tabSize = tabulationMark ? tabulationMark.attrs.tabSize : 4;
+        setTabSize(tabSize);
     };
 
     const handleChangeFontSize = (e) => {
@@ -100,6 +116,21 @@ export default function Editor() {
         setFontFamily(fontFamily);
     };
 
+    const handleChangeTabSize = (e) => {
+        const tabSize = parseInt(e.target.value);
+        const { tr } = editorRef.current.state;
+        const { selection } = tr;
+        if (!selection.empty) {
+            tr.addMark(
+                selection.from,
+                selection.to,
+                mySchema.marks.tabulation.create({ tabSize })
+            );
+            editorRef.current.dispatch(tr);
+        }
+        setTabSize(tabSize);
+    };
+
     return (
         <div>
             <div>
@@ -126,6 +157,18 @@ export default function Editor() {
                     <option value="Verdana">Verdana</option>
                     <option value="Times New Roman">Times New Roman</option>
                     <option value="Courier New">Courier New</option>
+                </select>
+            </div>
+            <div>
+                <label htmlFor="tab-size">Tab Size: </label>
+                <select
+                    id="tab-size"
+                    value={tabSize}
+                    onChange={handleChangeTabSize}
+                >
+                    <option value="2">2</option>
+                    <option value="4">4</option>
+                    <option value="8">8</option>
                 </select>
             </div>
             <div id="editor" ref={editorDom} />
