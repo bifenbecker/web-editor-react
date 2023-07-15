@@ -1,10 +1,37 @@
 import React, { useState, useEffect, useRef } from "react";
-import { EditorState } from "prosemirror-state";
+import { EditorState, TextSelection } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
-import { Schema, DOMParser } from "prosemirror-model";
-import { schema } from "prosemirror-schema-basic";
+import { Schema, DOMParser, Fragment } from "prosemirror-model";
+import { schema as baseSchema } from "prosemirror-schema-basic";
 import { addListNodes } from "prosemirror-schema-list";
-import { exampleSetup } from "prosemirror-example-setup";
+import { exampleSetup, buildMenuItems } from "prosemirror-example-setup";
+import {
+    addColumnAfter,
+    addColumnBefore,
+    deleteColumn,
+    addRowAfter,
+    addRowBefore,
+    deleteRow,
+    mergeCells,
+    splitCell,
+    toggleHeaderRow,
+    toggleHeaderColumn,
+    toggleHeaderCell,
+    goToNextCell,
+    deleteTable,
+    tableEditing,
+    columnResizing,
+    tableNodes,
+    fixTables
+} from "prosemirror-tables";
+import { MenuItem, Dropdown } from "prosemirror-menu";
+import { keymap } from "prosemirror-keymap";
+import autocomplete from "prosemirror-autocomplete";
+
+
+import "../styles/main.css"
+import "../styles/tables.css"
+
 
 const fontSizeMarkSpec = {
     attrs: { size: { default: 16 } },
@@ -44,10 +71,27 @@ const tabulationMarkSpec = {
 
 const nonBreakingSpace = "\u00A0";
 
-const mySchema = new Schema({
-    nodes: addListNodes(schema.spec.nodes, "paragraph block*", "block"),
+const schema = new Schema({
+    nodes: baseSchema.spec.nodes.append(
+        tableNodes({
+            tableGroup: "block",
+            cellContent: "block+",
+            cellAttributes: {
+                background: {
+                    default: null,
+                    getFromDOM(dom) {
+                        return (dom.style && dom.style.backgroundColor) || null;
+                    },
+                    setDOMAttr(value, attrs) {
+                        if (value)
+                            attrs.style = (attrs.style || "") + `background-color: ${value};`;
+                    }
+                }
+            }
+        })
+    ),
     marks: {
-        ...schema.spec.marks,
+        ...baseSchema.spec.marks,
         fontSize: fontSizeMarkSpec,
         fontFamily: fontFamilyMarkSpec,
         tabulation: tabulationMarkSpec,
@@ -55,7 +99,70 @@ const mySchema = new Schema({
     },
 });
 
-const doc = DOMParser.fromSchema(mySchema).parse(document.createElement("div"));
+let menu = buildMenuItems(schema).fullMenu;
+function item(label, cmd) {
+    return new MenuItem({ label, select: cmd, run: cmd });
+}
+
+function insertTable() {
+    return (state, dispatch) => {
+        const offset = state.tr.selection.anchor + 1;
+        const transaction = state.tr;
+        const cell = state.schema.nodes.table_cell.createAndFill();
+        const node = state.schema.nodes.table.create(
+            null,
+            Fragment.fromArray([
+                state.schema.nodes.table_row.create(
+                    null,
+                    Fragment.fromArray([cell, cell, cell])
+                ),
+                state.schema.nodes.table_row.create(
+                    null,
+                    Fragment.fromArray([cell, cell, cell])
+                )
+            ])
+        );
+
+        if (dispatch) {
+            dispatch(
+                transaction
+                    .replaceSelectionWith(node)
+                    .scrollIntoView()
+                    .setSelection(TextSelection.near(transaction.doc.resolve(offset)))
+            );
+        }
+
+        return true;
+    };
+}
+
+menu.push([
+    new MenuItem({
+        label: "Add table",
+        title: "Insert table",
+        class: "ProseMirror-icon",
+        run: insertTable()
+    }),
+    new Dropdown(
+        [
+            item("Insert column before", addColumnBefore),
+            item("Insert column after", addColumnAfter),
+            item("Delete column", deleteColumn),
+            item("Insert row before", addRowBefore),
+            item("Insert row after", addRowAfter),
+            item("Delete row", deleteRow),
+            item("Delete table", deleteTable),
+            item("Merge cells", mergeCells),
+            item("Split cell", splitCell),
+            item("Toggle header column", toggleHeaderColumn),
+            item("Toggle header row", toggleHeaderRow),
+            item("Toggle header cells", toggleHeaderCell)
+        ],
+        { label: "Edit table" }
+    )
+]);
+
+const doc = DOMParser.fromSchema(schema).parse(document.createElement("div"));
 
 export default function Editor() {
     const editorRef = useRef(null);
@@ -66,9 +173,22 @@ export default function Editor() {
 
     useEffect(() => {
         if (!editorRef.current) {
-            const plugins = exampleSetup({ schema: mySchema });
+            const plugins = [
+                ...autocomplete(),
+                columnResizing(),
+                tableEditing(),
+                keymap({
+                    Tab: goToNextCell(1),
+                    "Shift-Tab": goToNextCell(-1)
+                })
+            ].concat(exampleSetup({ schema, menuContent: menu }));
+
+            let state = EditorState.create({ doc, plugins });
+            let fix = fixTables(state);
+            if (fix) state = state.apply(fix.setMeta("addToHistory", false));
+
             editorRef.current = new EditorView(editorDom.current, {
-                state: EditorState.create({ doc, plugins }),
+                state: state,
                 dispatchTransaction: (transaction) =>
                     handleTransaction(transaction),
             });
@@ -78,10 +198,10 @@ export default function Editor() {
     const handleTransaction = (transaction) => {
         const { state } = editorRef.current.state.applyTransaction(transaction);
         editorRef.current.updateState(state);
-        const fontSizeMark = mySchema.marks.fontSize;
+        const fontSizeMark = schema.marks.fontSize;
         const fontSize = fontSizeMark ? fontSizeMark.attrs.size : 16;
         setFontSize(fontSize);
-        const tabulationMark = mySchema.marks.tabulation;
+        const tabulationMark = schema.marks.tabulation;
         const tabSize = tabulationMark ? tabulationMark.attrs.tabSize : 4;
         setTabSize(tabSize);
     };
@@ -94,7 +214,7 @@ export default function Editor() {
             tr.addMark(
                 selection.from,
                 selection.to,
-                mySchema.marks.fontSize.create({ size: fontSize })
+                schema.marks.fontSize.create({ size: fontSize })
             );
             editorRef.current.dispatch(tr);
         }
@@ -109,7 +229,7 @@ export default function Editor() {
             tr.addMark(
                 selection.from,
                 selection.to,
-                mySchema.marks.fontFamily.create({ fontFamily })
+                schema.marks.fontFamily.create({ fontFamily })
             );
             editorRef.current.dispatch(tr);
         }
