@@ -2,8 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { EditorState, TextSelection } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { Schema, DOMParser, Fragment } from "prosemirror-model";
-import { schema as baseSchema } from "prosemirror-schema-basic";
-import { addListNodes } from "prosemirror-schema-list";
+import { schema as baseSchema, marks } from "prosemirror-schema-basic";
 import { exampleSetup, buildMenuItems } from "prosemirror-example-setup";
 import {
     addColumnAfter,
@@ -92,6 +91,10 @@ const schema = new Schema({
     ),
     marks: {
         ...baseSchema.spec.marks,
+        strong: marks.strong,
+        em: marks.em,
+        code: marks.code,
+        link: marks.link,
         fontSize: fontSizeMarkSpec,
         fontFamily: fontFamilyMarkSpec,
         tabulation: tabulationMarkSpec,
