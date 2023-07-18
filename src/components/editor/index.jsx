@@ -21,16 +21,15 @@ import {
     tableEditing,
     columnResizing,
     tableNodes,
-    fixTables
+    fixTables,
 } from "prosemirror-tables";
-import { MenuItem, Dropdown } from "prosemirror-menu";
+import { MenuItem, Dropdown, DropdownSubmenu } from "prosemirror-menu";
 import { keymap } from "prosemirror-keymap";
-import autocomplete from "prosemirror-autocomplete";
+import { autocomplete } from "prosemirror-autocomplete";
+import { addListNodes } from "prosemirror-schema-list";
 
-
-import "../styles/main.css"
-import "../styles/tables.css"
-
+import "../styles/main.css";
+import "../styles/tables.css";
 
 const fontSizeMarkSpec = {
     attrs: { size: { default: 16 } },
@@ -68,27 +67,115 @@ const tabulationMarkSpec = {
     toDOM: (node) => ["pre", { style: `tab-size: ${node.attrs.tabSize}` }, 0],
 };
 
+const indentMarkSpec = {
+    attrs: { level: { default: 0 } },
+    parseDOM: [
+        {
+            style: "margin-left",
+            getAttrs: (value) => ({ level: parseInt(value, 10) / 40 }),
+        },
+    ],
+    toDOM: (node) => [
+        "div",
+        { style: `margin-left: ${node.attrs.level * 40}px` },
+        0,
+    ],
+};
+
+const alignmentMarkSpec = {
+    attrs: { align: { default: "left" } },
+    parseDOM: [
+        {
+            style: "text-align",
+            getAttrs: (value) => ({ align: value }),
+        },
+    ],
+    toDOM: (node) => [
+        "div",
+        { style: `text-align: ${node.attrs.align}` },
+        0,
+    ],
+};
+
+const lineSpacingMarkSpec = {
+    attrs: { spacing: { default: 1 } },
+    parseDOM: [
+        {
+            style: "line-height",
+            getAttrs: (value) => ({ spacing: parseFloat(value) }),
+        },
+    ],
+    toDOM: (node) => ["div", { style: `line-height: ${node.attrs.spacing}` }, 0],
+};
+
+const paragraphSpacingNodeSpec = {
+    attrs: { spaceBefore: { default: 0 }, spaceAfter: { default: 0 } },
+    parseDOM: [
+        {
+            style: "margin-top",
+            getAttrs: (value) => ({ spaceBefore: parseFloat(value) }),
+        },
+        {
+            style: "margin-bottom",
+            getAttrs: (value) => ({ spaceAfter: parseFloat(value) }),
+        },
+    ],
+    toDOM: (node) => [
+        "div",
+        {
+            style: `margin-top: ${node.attrs.spaceBefore}px; margin-bottom: ${node.attrs.spaceAfter}px`,
+        },
+        0,
+    ],
+};
+
 const nonBreakingSpace = "\u00A0";
 
+const listNodes = addListNodes(baseSchema.spec.nodes, "paragraph block*", "block");
+const table = tableNodes({
+    tableGroup: "block",
+    cellContent: "block+",
+    cellAttributes: {
+        background: {
+            default: null,
+            getFromDOM(dom) {
+                return (dom.style && dom.style.backgroundColor) || null;
+            },
+            setDOMAttr(value, attrs) {
+                if (value) attrs.style = (attrs.style || "") + `background-color: ${value};`;
+            },
+        },
+    },
+});
+
+const headingNodes = {
+    heading: {
+        attrs: { level: { default: 1 } },
+        content: "inline*",
+        group: "block",
+        defining: true,
+        parseDOM: [
+            { tag: "h1", attrs: { level: 1 } },
+            { tag: "h2", attrs: { level: 2 } },
+            { tag: "h3", attrs: { level: 3 } },
+            { tag: "h4", attrs: { level: 4 } },
+            { tag: "h5", attrs: { level: 5 } },
+            { tag: "h6", attrs: { level: 6 } },
+        ],
+        toDOM(node) {
+            return ["h" + node.attrs.level, 0];
+        },
+    },
+};
+
+const extendedNodes = baseSchema.spec.nodes
+    .addBefore("table", "paragraphSpacing", paragraphSpacingNodeSpec)
+    .append(listNodes)
+    .append(table)
+    .update("heading", headingNodes.heading);
+
 const schema = new Schema({
-    nodes: baseSchema.spec.nodes.append(
-        tableNodes({
-            tableGroup: "block",
-            cellContent: "block+",
-            cellAttributes: {
-                background: {
-                    default: null,
-                    getFromDOM(dom) {
-                        return (dom.style && dom.style.backgroundColor) || null;
-                    },
-                    setDOMAttr(value, attrs) {
-                        if (value)
-                            attrs.style = (attrs.style || "") + `background-color: ${value};`;
-                    }
-                }
-            }
-        })
-    ),
+    nodes: extendedNodes,
     marks: {
         ...baseSchema.spec.marks,
         strong: marks.strong,
@@ -98,8 +185,12 @@ const schema = new Schema({
         fontSize: fontSizeMarkSpec,
         fontFamily: fontFamilyMarkSpec,
         tabulation: tabulationMarkSpec,
+        indent: indentMarkSpec,
+        alignment: alignmentMarkSpec,
+        lineSpacing: lineSpacingMarkSpec,
         nonBreakingSpace: nonBreakingSpace,
     },
+    topNode: "doc",
 });
 
 let menu = buildMenuItems(schema).fullMenu;
@@ -122,7 +213,7 @@ function insertTable() {
                 state.schema.nodes.table_row.create(
                     null,
                     Fragment.fromArray([cell, cell, cell])
-                )
+                ),
             ])
         );
 
@@ -139,12 +230,76 @@ function insertTable() {
     };
 }
 
+function toggleList(state, listType) {
+    const { $from, $to } = state.selection;
+    const isList = state.selection.$from.parent.type === listType;
+
+    if (isList) {
+        const { tr } = state;
+        tr.doc.nodesBetween($from.pos, $to.pos, (node, pos) => {
+            if (node.type === listType) {
+                tr.setNodeMarkup(pos, null, {});
+            }
+        });
+        return tr;
+    } else {
+        // If the current block is not a list, convert it to a list
+        // return state.tr.setBlockType($from.pos, $to.pos, listType);
+    }
+}
+
+function setBlockType(state, nodeType, attrs) {
+    const { $from, $to } = state.selection;
+    const tr = state.tr;
+
+    state.doc.nodesBetween($from.pos, $to.pos, (node, pos) => {
+        if (node.isTextblock) {
+            tr.setNodeMarkup(pos, nodeType, attrs);
+        }
+    });
+
+    if (tr.docChanged) {
+        return tr;
+    }
+
+    return null;
+}
+
+function headingType(level) {
+    return {
+        label: `H${level}`,
+        select: (state) => setBlockType(state, schema.nodes.heading, { level: level }),
+        run: (state, dispatch) => {
+            const transaction = setBlockType(state, schema.nodes.heading, { level: level });
+            dispatch(transaction);
+        },
+    }
+}
+
 menu.push([
+    new DropdownSubmenu([
+        new MenuItem(headingType(1)),
+        new MenuItem(headingType(2)),
+        new MenuItem(headingType(3)),
+        new MenuItem(headingType(4)),
+        new MenuItem(headingType(5)),
+        new MenuItem(headingType(6)),
+    ], {
+        label: "Heading",
+    }),
+    new MenuItem({
+        label: "Ordered List",
+        select: (state) => toggleList(state, schema.nodes.ordered_list),
+        run: (state, dispatch) => {
+            const transaction = toggleList(state, schema.nodes.ordered_list);
+            dispatch(transaction);
+        },
+    }),
     new MenuItem({
         label: "Add table",
         title: "Insert table",
         class: "ProseMirror-icon",
-        run: insertTable()
+        run: insertTable(),
     }),
     new Dropdown(
         [
@@ -159,10 +314,10 @@ menu.push([
             item("Split cell", splitCell),
             item("Toggle header column", toggleHeaderColumn),
             item("Toggle header row", toggleHeaderRow),
-            item("Toggle header cells", toggleHeaderCell)
+            item("Toggle header cells", toggleHeaderCell),
         ],
         { label: "Edit table" }
-    )
+    ),
 ]);
 
 const doc = DOMParser.fromSchema(schema).parse(document.createElement("div"));
@@ -182,8 +337,8 @@ export default function Editor() {
                 tableEditing(),
                 keymap({
                     Tab: goToNextCell(1),
-                    "Shift-Tab": goToNextCell(-1)
-                })
+                    "Shift-Tab": goToNextCell(-1),
+                }),
             ].concat(exampleSetup({ schema, menuContent: menu }));
 
             let state = EditorState.create({ doc, plugins });
@@ -254,12 +409,57 @@ export default function Editor() {
 
         tr.insertText(nonBreakingSpace, $from.pos, $from.pos);
         editorRef.current.dispatch(tr);
-      };
+    };
 
     const handleKeyDown = (e) => {
         if (e.key === "Tab") {
             e.preventDefault();
             handleTabulation();
+        }
+    };
+
+    const handleIndentation = (level) => {
+        const { tr } = editorRef.current.state;
+        const { selection } = tr;
+        if (!selection.empty) {
+            const { $from, $to } = selection;
+            const markType = schema.marks.indent;
+
+            tr.addMark(
+                $from.pos,
+                $to.pos,
+                markType.create({ level })
+            );
+            editorRef.current.dispatch(tr);
+        }
+    };
+
+    const handleAlignment = (alignment) => {
+        const { tr } = editorRef.current.state;
+        const { $from, $to } = tr.selection;
+        const markType = schema.marks.alignment;
+
+        tr.addMark(
+            $from.before($from.depth),
+            $to.after($to.depth),
+            markType.create({ align: alignment })
+        );
+        editorRef.current.dispatch(tr);
+    };
+
+    const handleLineSpacing = (spacing) => {
+        const { tr } = editorRef.current.state;
+        const { selection } = tr;
+        if (!selection.empty) {
+            const { $from, $to } = selection;
+            const markType = schema.marks.lineSpacing;
+
+            tr.addMark(
+                $from.pos,
+                $to.pos,
+                markType.create({ spacing })
+            );
+            editorRef.current.dispatch(tr);
         }
     };
 
@@ -299,7 +499,29 @@ export default function Editor() {
                 Insert Non-Breaking Space:{" "}
                 <button onClick={handleInsertNonBreakingSpace}>space</button>
             </div>
-            <div id="editor" ref={editorDom} onKeyDown={handleKeyDown} tabIndex={0} />
+            <div>
+                Indentation:
+                <button onClick={() => handleIndentation(1)}>Indent</button>
+                <button onClick={() => handleIndentation(0)}>Remove Indent</button>
+            </div>
+            <div>
+                Alignment:
+                <button onClick={() => handleAlignment("left")}>Left</button>
+                <button onClick={() => handleAlignment("center")}>Center</button>
+                <button onClick={() => handleAlignment("right")}>Right</button>
+            </div>
+            <div>
+                Line Spacing:
+                <button onClick={() => handleLineSpacing(1)}>Normal</button>
+                <button onClick={() => handleLineSpacing(1.5)}>1.5</button>
+                <button onClick={() => handleLineSpacing(2)}>Double</button>
+            </div>
+            <div
+                id="editor"
+                ref={editorDom}
+                onKeyDown={handleKeyDown}
+                tabIndex={0}
+            />
         </div>
     );
 }

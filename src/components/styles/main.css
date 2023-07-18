@@ -1,42 +1,54 @@
-body {
-    max-width: 50em;
-    font-family: Georgia;
-}
-.ProseMirror-menubar-wrapper {
-    border: 1px solid silver;
-    outline: none;
-}
-.ProseMirror {
-    padding: 5px 15px;
-}
-.ProseMirror table {
-    margin: 0;
-}
-.ProseMirror th,
-.ProseMirror td {
-    min-width: 1em;
-    border: 1px solid #ddd;
-    padding: 3px 5px;
-}
-.ProseMirror .tableWrapper {
-    margin: 1em 0;
-}
-.ProseMirror th {
-    font-weight: bold;
-    text-align: left;
-}
-
-pre {
-    white-space: pre-wrap; /* Since CSS 2.1 */
-    white-space: -moz-pre-wrap; /* Mozilla, since 1999 */
-    white-space: -pre-wrap; /* Opera 4-6 */
-    white-space: -o-pre-wrap; /* Opera 7 */
-    word-wrap: break-word; /* Internet Explorer 5.5+ */
-}
-
-#variable,
-#suggestion {
+#editor {
+    border: 1px solid #ccc;
     padding: 10px;
-    background-color: white;
-    z-index: 100;
+    height: 300px;
+    font-family: Arial, sans-serif;
+}
+
+button {
+    margin-right: 5px;
+}
+
+label {
+    margin-right: 5px;
+}
+
+select {
+    padding: 3px;
+}
+
+/* Дополнительные стили для таблиц */
+table {
+    border-collapse: collapse;
+}
+
+th,
+td {
+    border: 1px solid #ccc;
+    padding: 5px;
+}
+
+th {
+    background-color: #f0f0f0;
+}
+
+/* Дополнительные стили для выделенных элементов */
+.ProseMirror-selectednode {
+    background-color: #cce8ff;
+}
+
+.ProseMirror-selectednode:after {
+    content: "";
+    display: table;
+    clear: both;
+}
+
+.ProseMirror-selectednode table {
+    border-collapse: collapse;
+}
+
+.ProseMirror-selectednode td,
+.ProseMirror-selectednode th {
+    border: 1px solid #999;
+    padding: 5px;
 }
