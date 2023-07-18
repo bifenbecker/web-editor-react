@@ -23,9 +23,10 @@ import {
     tableNodes,
     fixTables,
 } from "prosemirror-tables";
-import { MenuItem, Dropdown } from "prosemirror-menu";
+import { MenuItem, Dropdown, DropdownSubmenu } from "prosemirror-menu";
 import { keymap } from "prosemirror-keymap";
-import autocomplete from "prosemirror-autocomplete";
+import { autocomplete } from "prosemirror-autocomplete";
+import { addListNodes } from "prosemirror-schema-list";
 
 import "../styles/main.css";
 import "../styles/tables.css";
@@ -130,25 +131,48 @@ const paragraphSpacingNodeSpec = {
 
 const nonBreakingSpace = "\u00A0";
 
+const listNodes = addListNodes(baseSchema.spec.nodes, "paragraph block*", "block");
+const table = tableNodes({
+    tableGroup: "block",
+    cellContent: "block+",
+    cellAttributes: {
+        background: {
+            default: null,
+            getFromDOM(dom) {
+                return (dom.style && dom.style.backgroundColor) || null;
+            },
+            setDOMAttr(value, attrs) {
+                if (value) attrs.style = (attrs.style || "") + `background-color: ${value};`;
+            },
+        },
+    },
+});
+
+const headingNodes = {
+    heading: {
+        attrs: { level: { default: 1 } },
+        content: "inline*",
+        group: "block",
+        defining: true,
+        parseDOM: [
+            { tag: "h1", attrs: { level: 1 } },
+            { tag: "h2", attrs: { level: 2 } },
+            { tag: "h3", attrs: { level: 3 } },
+            { tag: "h4", attrs: { level: 4 } },
+            { tag: "h5", attrs: { level: 5 } },
+            { tag: "h6", attrs: { level: 6 } },
+        ],
+        toDOM(node) {
+            return ["h" + node.attrs.level, 0];
+        },
+    },
+};
+
 const extendedNodes = baseSchema.spec.nodes
     .addBefore("table", "paragraphSpacing", paragraphSpacingNodeSpec)
-    .append(
-        tableNodes({
-            tableGroup: "block",
-            cellContent: "block+",
-            cellAttributes: {
-                background: {
-                    default: null,
-                    getFromDOM(dom) {
-                        return (dom.style && dom.style.backgroundColor) || null;
-                    },
-                    setDOMAttr(value, attrs) {
-                        if (value) attrs.style = (attrs.style || "") + `background-color: ${value};`;
-                    },
-                },
-            },
-        })
-    );
+    .append(listNodes)
+    .append(table)
+    .update("heading", headingNodes.heading);
 
 const schema = new Schema({
     nodes: extendedNodes,
@@ -166,7 +190,7 @@ const schema = new Schema({
         lineSpacing: lineSpacingMarkSpec,
         nonBreakingSpace: nonBreakingSpace,
     },
-    topNode: 'doc',
+    topNode: "doc",
 });
 
 let menu = buildMenuItems(schema).fullMenu;
@@ -206,7 +230,71 @@ function insertTable() {
     };
 }
 
+function toggleList(state, listType) {
+    const { $from, $to } = state.selection;
+    const isList = state.selection.$from.parent.type === listType;
+
+    if (isList) {
+        const { tr } = state;
+        tr.doc.nodesBetween($from.pos, $to.pos, (node, pos) => {
+            if (node.type === listType) {
+                tr.setNodeMarkup(pos, null, {});
+            }
+        });
+        return tr;
+    } else {
+        // If the current block is not a list, convert it to a list
+        // return state.tr.setBlockType($from.pos, $to.pos, listType);
+    }
+}
+
+function setBlockType(state, nodeType, attrs) {
+    const { $from, $to } = state.selection;
+    const tr = state.tr;
+
+    state.doc.nodesBetween($from.pos, $to.pos, (node, pos) => {
+        if (node.isTextblock) {
+            tr.setNodeMarkup(pos, nodeType, attrs);
+        }
+    });
+
+    if (tr.docChanged) {
+        return tr;
+    }
+
+    return null;
+}
+
+function headingType(level) {
+    return {
+        label: `H${level}`,
+        select: (state) => setBlockType(state, schema.nodes.heading, { level: level }),
+        run: (state, dispatch) => {
+            const transaction = setBlockType(state, schema.nodes.heading, { level: level });
+            dispatch(transaction);
+        },
+    }
+}
+
 menu.push([
+    new DropdownSubmenu([
+        new MenuItem(headingType(1)),
+        new MenuItem(headingType(2)),
+        new MenuItem(headingType(3)),
+        new MenuItem(headingType(4)),
+        new MenuItem(headingType(5)),
+        new MenuItem(headingType(6)),
+    ], {
+        label: "Heading",
+    }),
+    new MenuItem({
+        label: "Ordered List",
+        select: (state) => toggleList(state, schema.nodes.ordered_list),
+        run: (state, dispatch) => {
+            const transaction = toggleList(state, schema.nodes.ordered_list);
+            dispatch(transaction);
+        },
+    }),
     new MenuItem({
         label: "Add table",
         title: "Insert table",
